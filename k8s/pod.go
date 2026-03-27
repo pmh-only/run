@@ -210,6 +210,11 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 		Spec: corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
 			AutomountServiceAccountToken: &automount,
+			SecurityContext: &corev1.PodSecurityContext{
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeUnconfined,
+				},
+			},
 			DNSPolicy: corev1.DNSNone,
 			DNSConfig: &corev1.PodDNSConfig{
 				Nameservers: []string{"1.1.1.1"},
