@@ -1,0 +1,4 @@
+run
+*.env
+.env*
+deploy/secret.yaml
