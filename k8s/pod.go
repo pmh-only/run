@@ -172,7 +172,6 @@ func (m *PodManager) waitForPod(ctx context.Context, name string) (*corev1.Pod, 
 
 func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 	automount := false
-	runtimeClass := "sysbox-runc"
 
 	// Directories to persist (seed from image on first boot)
 	persistDirs := []string{"usr", "etc", "var", "home", "root", "opt", "srv"}
@@ -209,7 +208,6 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 			},
 		},
 		Spec: corev1.PodSpec{
-			RuntimeClassName:             &runtimeClass,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			AutomountServiceAccountToken: &automount,
 			DNSPolicy: corev1.DNSNone,
@@ -238,8 +236,16 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 							corev1.ResourceMemory: resource.MustParse(m.memLimit),
 						},
 					},
-					Stdin:        true,
-					TTY:          true,
+					Stdin: true,
+					TTY:   true,
+					SecurityContext: &corev1.SecurityContext{
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"},
+						},
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeUnconfined,
+						},
+					},
 					VolumeMounts: mounts,
 				},
 			},

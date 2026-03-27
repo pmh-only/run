@@ -1,0 +1,35 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        systemd \
+        systemd-sysv \
+        dbus \
+        sudo \
+        curl \
+        wget \
+        vim \
+        nano \
+        git \
+        build-essential \
+        ca-certificates \
+        locales \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && locale-gen en_US.UTF-8 \
+    && rm -f /etc/machine-id \
+    && for unit in \
+        systemd-udevd.service \
+        systemd-udev-settle.service \
+        systemd-udev-trigger.service \
+        systemd-modules-load.service \
+        sys-kernel-debug.mount \
+        sys-kernel-tracing.mount \
+        proc-sys-fs-binfmt_misc.automount; \
+    do ln -sf /dev/null /etc/systemd/system/$unit; done
+
+ENV LANG=en_US.UTF-8
+
+CMD ["/sbin/init"]
