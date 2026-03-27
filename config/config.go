@@ -15,9 +15,10 @@ type Config struct {
 	PodNamespace   string
 	PodImage       string
 	PodShell       string
-	PodCPULimit    string
-	PodMemoryLimit string
-	Kubeconfig     string
+	PodCPULimit      string
+	PodMemoryLimit   string
+	PodStorageSize   string
+	Kubeconfig       string
 }
 
 func Load() (*Config, error) {
@@ -33,6 +34,7 @@ func Load() (*Config, error) {
 		PodShell:       getEnv("POD_SHELL", "/bin/bash"),
 		PodCPULimit:    getEnv("POD_CPU_LIMIT", "500m"),
 		PodMemoryLimit: getEnv("POD_MEMORY_LIMIT", "256Mi"),
+		PodStorageSize: getEnv("POD_STORAGE_SIZE", "10Gi"),
 		Kubeconfig:     os.Getenv("KUBECONFIG"),
 	}
 

@@ -32,7 +32,7 @@ func main() {
 		log.Fatalf("k8s client error: %v", err)
 	}
 
-	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit)
+	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
 	termHandler := terminal.New(k8sClient, restCfg, cfg.PodNamespace, cfg.PodShell, cfg.BaseURL)
 
 	mux := http.NewServeMux()
