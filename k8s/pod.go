@@ -210,11 +210,6 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 		Spec: corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
 			AutomountServiceAccountToken: &automount,
-			SecurityContext: &corev1.PodSecurityContext{
-				SeccompProfile: &corev1.SeccompProfile{
-					Type: corev1.SeccompProfileTypeUnconfined,
-				},
-			},
 			DNSPolicy: corev1.DNSNone,
 			DNSConfig: &corev1.PodDNSConfig{
 				Nameservers: []string{"1.1.1.1"},
@@ -244,12 +239,7 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 					Stdin: true,
 					TTY:   true,
 					SecurityContext: &corev1.SecurityContext{
-						Capabilities: &corev1.Capabilities{
-							Add: []corev1.Capability{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"},
-						},
-						SeccompProfile: &corev1.SeccompProfile{
-							Type: corev1.SeccompProfileTypeUnconfined,
-						},
+						Privileged: func() *bool { b := true; return &b }(),
 					},
 					VolumeMounts: mounts,
 				},
