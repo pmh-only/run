@@ -27,7 +27,14 @@ RUN apt-get update && \
         systemd-modules-load.service \
         sys-kernel-debug.mount \
         sys-kernel-tracing.mount \
-        proc-sys-fs-binfmt_misc.automount; \
+        proc-sys-fs-binfmt_misc.automount \
+        sys-fs-fuse-connections.mount \
+        systemd-machine-id-commit.service \
+        systemd-networkd.service \
+        systemd-networkd.socket \
+        systemd-networkd-wait-online.service \
+        systemd-resolved.service \
+        systemd-sysusers.service; \
     do ln -sf /dev/null /etc/systemd/system/$unit; done
 
 ENV LANG=en_US.UTF-8

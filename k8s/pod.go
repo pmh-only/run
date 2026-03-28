@@ -227,9 +227,11 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 			},
 			Containers: []corev1.Container{
 				{
-					Name:    "shell",
-					Image:   m.image,
-					Command: []string{"/sbin/init"},
+					Name:  "shell",
+					Image: m.image,
+					// Remount cgroup2 rw before exec'ing systemd as PID 1.
+					// k3s mounts /sys/fs/cgroup ro for non-privileged containers.
+					Command: []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init"},
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse(m.cpuLimit),
@@ -239,9 +241,27 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 					Stdin: true,
 					TTY:   true,
 					SecurityContext: &corev1.SecurityContext{
-						Privileged: func() *bool { b := true; return &b }(),
+						Capabilities: &corev1.Capabilities{
+							Add: []corev1.Capability{
+								"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE",
+								"SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE",
+								"DAC_READ_SEARCH", "FOWNER", "FSETID", "KILL",
+								"MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETPCAP",
+								"SYS_CHROOT", "SYS_RESOURCE", "AUDIT_WRITE", "IPC_LOCK", "SYS_BOOT",
+							},
+						},
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeUnconfined,
+						},
+						AppArmorProfile: &corev1.AppArmorProfile{
+							Type:             corev1.AppArmorProfileTypeLocalhost,
+							LocalhostProfile: func() *string { s := "run-user"; return &s }(),
+						},
 					},
-					VolumeMounts: mounts,
+					VolumeMounts: append(mounts, corev1.VolumeMount{
+						Name:      "kmsg",
+						MountPath: "/dev/kmsg",
+					}),
 				},
 			},
 			Volumes: []corev1.Volume{
@@ -250,6 +270,14 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: pvcName(userSub),
+						},
+					},
+				},
+				{
+					Name: "kmsg",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/dev/kmsg",
 						},
 					},
 				},
