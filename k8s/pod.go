@@ -243,11 +243,19 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 					SecurityContext: &corev1.SecurityContext{
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
-								"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE",
-								"SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE",
-								"DAC_READ_SEARCH", "FOWNER", "FSETID", "KILL",
-								"MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETPCAP",
-								"SYS_CHROOT", "SYS_RESOURCE", "AUDIT_WRITE", "IPC_LOCK", "SYS_BOOT",
+								// Core systemd requirements
+								"SYS_ADMIN",       // cgroup v2, mount, namespace ops
+								"NET_ADMIN",       // systemd-networkd
+								"SYS_RESOURCE",    // setrlimit for service resource limits
+								// Process/user management
+								"SETUID", "SETGID", // service user switching
+								"KILL",             // process lifecycle
+								// File permission management (needed during boot)
+								"CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID",
+								// Device and service setup
+								"MKNOD",            // /dev device nodes
+								"NET_BIND_SERVICE", // services on ports < 1024
+								"AUDIT_WRITE",      // PAM authentication logging
 							},
 						},
 						SeccompProfile: &corev1.SeccompProfile{
