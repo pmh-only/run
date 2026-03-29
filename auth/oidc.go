@@ -176,10 +176,14 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // RequireAuth is middleware that redirects unauthenticated requests to /auth/login.
+// It also redirects sessions that are missing the username (e.g. created before
+// username support was added) so they re-authenticate and populate all fields.
 func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, err := h.sessions.Get(r)
-		if err != nil || session.GetString(sess, session.KeyUserSub) == "" {
+		if err != nil ||
+			session.GetString(sess, session.KeyUserSub) == "" ||
+			session.GetString(sess, session.KeyUsername) == "" {
 			http.Redirect(w, r, "/auth/login", http.StatusFound)
 			return
 		}

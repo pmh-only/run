@@ -59,11 +59,6 @@ func main() {
 		}
 		userSub := session.GetString(sessData, session.KeyUserSub)
 		username := session.GetString(sessData, session.KeyUsername)
-		if userSub == "" || username == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
 		termHandler.ServeHTTP(w, r, userSub, username)
 	})))
 
