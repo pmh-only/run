@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+
+	k8s "run.pmh.codes/run/k8s"
 )
 
 // Message prefixes for the WebSocket framing protocol.
@@ -30,18 +32,18 @@ type resizeMsg struct {
 type Handler struct {
 	client     *kubernetes.Clientset
 	restCfg    *rest.Config
+	podManager *k8s.PodManager
 	namespace  string
-	shell      string
 	upgrader   websocket.Upgrader
 }
 
-func New(client *kubernetes.Clientset, restCfg *rest.Config, namespace, shell, baseURL string) *Handler {
+func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.PodManager, namespace, baseURL string) *Handler {
 	origin, _ := url.Parse(baseURL)
 	return &Handler{
-		client:    client,
-		restCfg:   restCfg,
-		namespace: namespace,
-		shell:     shell,
+		client:     client,
+		restCfg:    restCfg,
+		podManager: podManager,
+		namespace:  namespace,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				o := r.Header.Get("Origin")
@@ -58,9 +60,9 @@ func New(client *kubernetes.Clientset, restCfg *rest.Config, namespace, shell, b
 	}
 }
 
-// ServeHTTP upgrades to WebSocket and connects to a running pod's exec endpoint.
-// The pod must already be running - callers should call EnsurePod before this.
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, pod *corev1.Pod) {
+// ServeHTTP upgrades to WebSocket immediately, then waits for the pod and
+// connects to it — keeping the browser connection alive during pod startup.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, username string) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade error: %v", err)
@@ -68,8 +70,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, pod *corev1.
 	}
 	defer conn.Close()
 
-	// Send "connecting" status message to the browser
-	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\nConnecting to your environment...\r\n"))
+	writeStatus := func(msg string) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\033[33m"+msg+"\033[0m\r\n"))
+	}
+
+	writeStatus("Starting your environment, please wait...")
+
+	pod, err := h.podManager.EnsurePod(r.Context(), userSub, username)
+	if err != nil {
+		log.Printf("ensure pod error for user %s: %v", userSub, err)
+		writeStatus("Failed to start pod: " + err.Error())
+		return
+	}
+
+	writeStatus("Connecting...")
 
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
@@ -126,7 +140,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, pod *corev1.
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "shell",
-			Command:   []string{h.shell},
+			Command:   []string{"su", "-", username},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -136,7 +150,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, pod *corev1.
 	exec, err := remotecommand.NewSPDYExecutor(h.restCfg, "POST", req.URL())
 	if err != nil {
 		log.Printf("spdy executor error: %v", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\nFailed to connect to pod: "+err.Error()+"\r\n"))
+		writeStatus("Failed to connect to pod: " + err.Error())
 		return
 	}
 

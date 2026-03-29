@@ -10,8 +10,9 @@ import (
 const sessionName = "run_session"
 
 const (
-	KeyUserSub   = "user_sub"
-	KeyUserEmail = "user_email"
+	KeyUserSub    = "user_sub"
+	KeyUserEmail  = "user_email"
+	KeyUsername   = "username"
 	KeyOAuthState = "oauth_state"
 	KeyOAuthNonce = "oauth_nonce"
 )

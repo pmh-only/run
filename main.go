@@ -33,7 +33,7 @@ func main() {
 	}
 
 	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
-	termHandler := terminal.New(k8sClient, restCfg, cfg.PodNamespace, cfg.PodShell, cfg.BaseURL)
+	termHandler := terminal.New(k8sClient, restCfg, podManager, cfg.PodNamespace, cfg.BaseURL)
 
 	mux := http.NewServeMux()
 
@@ -58,19 +58,13 @@ func main() {
 			return
 		}
 		userSub := session.GetString(sessData, session.KeyUserSub)
-		if userSub == "" {
+		username := session.GetString(sessData, session.KeyUsername)
+		if userSub == "" || username == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		pod, err := podManager.EnsurePod(r.Context(), userSub)
-		if err != nil {
-			log.Printf("ensure pod error for user %s: %v", userSub, err)
-			http.Error(w, "failed to start pod: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		termHandler.ServeHTTP(w, r, pod)
+		termHandler.ServeHTTP(w, r, userSub, username)
 	})))
 
 	// Root - serve terminal UI (requires auth)

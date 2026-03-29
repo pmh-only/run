@@ -60,7 +60,7 @@ func pvcName(sub string) string {
 }
 
 // EnsurePod returns a running pod for the user, creating one if needed.
-func (m *PodManager) EnsurePod(ctx context.Context, userSub string) (*corev1.Pod, error) {
+func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string) (*corev1.Pod, error) {
 	if err := m.ensurePVC(ctx, userSub); err != nil {
 		return nil, fmt.Errorf("ensure pvc: %w", err)
 	}
@@ -86,7 +86,7 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub string) (*corev1.Pod
 		}
 	}
 
-	newPod := m.buildPod(name, userSub)
+	newPod := m.buildPod(name, userSub, username)
 	created, err := m.client.CoreV1().Pods(m.namespace).Create(ctx, newPod, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -170,7 +170,7 @@ func (m *PodManager) waitForPod(ctx context.Context, name string) (*corev1.Pod, 
 	}
 }
 
-func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
+func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 	automount := false
 
 	// Directories to persist (seed from image on first boot)
@@ -223,6 +223,19 @@ func (m *PodManager) buildPod(name, userSub string) *corev1.Pod {
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "storage", MountPath: "/persist"},
 					},
+				},
+				{
+					Name:  "setup-user",
+					Image: m.image,
+					Command: []string{"/bin/bash", "-c", fmt.Sprintf(`
+USERNAME=%q
+id "$USERNAME" >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash "$USERNAME"
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
+chmod 440 /etc/sudoers.d/"$USERNAME"
+`, username)},
+					VolumeMounts: append(mounts, corev1.VolumeMount{
+						Name: "storage", MountPath: "/persist",
+					}),
 				},
 			},
 			Containers: []corev1.Container{

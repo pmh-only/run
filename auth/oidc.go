@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -13,6 +15,22 @@ import (
 	"run.pmh.codes/run/config"
 	"run.pmh.codes/run/session"
 )
+
+var nonUsernameChar = regexp.MustCompile(`[^a-z0-9_]`)
+
+// sanitizeUsername converts an OIDC preferred_username into a valid Linux username.
+func sanitizeUsername(raw string) string {
+	s := strings.ToLower(raw)
+	s = nonUsernameChar.ReplaceAllString(s, "_")
+	s = strings.Trim(s, "_")
+	if s == "" || (s[0] >= '0' && s[0] <= '9') {
+		s = "user_" + s
+	}
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
+}
 
 type Handler struct {
 	cfg      *config.Config
@@ -114,19 +132,31 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var claims struct {
-		Sub   string `json:"sub"`
-		Email string `json:"email"`
+		Sub               string `json:"sub"`
+		Email             string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
+		Name              string `json:"name"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		http.Error(w, "claims error", http.StatusInternalServerError)
 		return
 	}
 
+	raw := claims.PreferredUsername
+	if raw == "" {
+		raw = claims.Name
+	}
+	if raw == "" {
+		raw = claims.Email
+	}
+	username := sanitizeUsername(raw)
+
 	// Clear temporary OAuth state, store user identity
 	delete(sess.Values, session.KeyOAuthState)
 	delete(sess.Values, session.KeyOAuthNonce)
 	sess.Values[session.KeyUserSub] = claims.Sub
 	sess.Values[session.KeyUserEmail] = claims.Email
+	sess.Values[session.KeyUsername] = username
 
 	if err := h.sessions.Save(r, w, sess); err != nil {
 		http.Error(w, "session save error", http.StatusInternalServerError)
