@@ -39,39 +39,11 @@
   const status = document.getElementById('status');
   term.open(container);
 
-  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${wsProto}//${location.host}/terminal`);
-  ws.binaryType = 'arraybuffer';
+  let ws = null;
 
-  ws.onopen = function () {
-    status.remove();
-    fitAddon.fit();
-    sendResize();
-  };
-
-  ws.onmessage = function (evt) {
-    let data;
-    if (evt.data instanceof ArrayBuffer) {
-      const arr = new Uint8Array(evt.data);
-      if (arr[0] === MSG_DATA) {
-        term.write(arr.slice(1));
-      }
-    } else {
-      // Plain text (e.g. status messages from server before binary protocol starts)
-      term.write(evt.data);
-    }
-  };
-
-  ws.onclose = function () {
-    term.write('\r\n\x1b[31mConnection closed.\x1b[0m Press F5 to reconnect.\r\n');
-  };
-
-  ws.onerror = function () {
-    term.write('\r\n\x1b[31mWebSocket error.\x1b[0m\r\n');
-  };
-
+  // Persistent input handler: forwards keystrokes to WS when open.
   term.onData(function (data) {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const encoded = new TextEncoder().encode(data);
     const msg = new Uint8Array(1 + encoded.length);
     msg[0] = MSG_DATA;
@@ -80,18 +52,63 @@
   });
 
   function sendResize() {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const size = { cols: term.cols, rows: term.rows };
-    const json = JSON.stringify(size);
-    const encoded = new TextEncoder().encode(json);
+    const encoded = new TextEncoder().encode(JSON.stringify(size));
     const msg = new Uint8Array(1 + encoded.length);
     msg[0] = MSG_RESIZE;
     msg.set(encoded, 1);
     ws.send(msg);
   }
 
+  function connect() {
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+    }
+
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${wsProto}//${location.host}/terminal`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = function () {
+      if (status) status.remove();
+      fitAddon.fit();
+      sendResize();
+    };
+
+    ws.onmessage = function (evt) {
+      if (evt.data instanceof ArrayBuffer) {
+        const arr = new Uint8Array(evt.data);
+        if (arr[0] === MSG_DATA) {
+          term.write(arr.slice(1));
+        }
+      } else {
+        // Plain text status messages from server
+        term.write(evt.data);
+      }
+    };
+
+    ws.onclose = function () {
+      term.write('\r\n\x1b[31mConnection closed.\x1b[0m \x1b[33mPress any key to reconnect...\x1b[0m\r\n');
+      // One-shot listener: first keypress reconnects, then removes itself.
+      const disposable = term.onData(function () {
+        disposable.dispose();
+        term.write('\x1b[33mReconnecting...\x1b[0m\r\n');
+        connect();
+      });
+    };
+
+    ws.onerror = function () {
+      term.write('\r\n\x1b[31mWebSocket error.\x1b[0m\r\n');
+    };
+  }
+
   window.addEventListener('resize', function () {
     fitAddon.fit();
     sendResize();
   });
+
+  connect();
 })();
