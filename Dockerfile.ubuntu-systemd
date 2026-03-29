@@ -19,6 +19,11 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && locale-gen en_US.UTF-8 \
+    && sed -i \
+        -e 's|http://archive.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
+        -e 's|http://security.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
+        -e 's|http://ports.ubuntu.com/ubuntu-ports|https://ftp.kaist.ac.kr/ubuntu-ports|g' \
+        /etc/apt/sources.list.d/ubuntu.sources \
     && rm -f /etc/machine-id \
     && for unit in \
         systemd-udevd.service \
