@@ -83,5 +83,5 @@ jobs:
         run: |
           cd /tmp/digests
           digests=$(ls | sed 's|^|ghcr.io/pmh-only/ubuntu-systemd@sha256:|' | tr '\n' ' ')
-          docker buildx imagetools create -t ghcr.io/pmh-only/ubuntu-systemd:22.04 $digests
-          docker buildx imagetools inspect ghcr.io/pmh-only/ubuntu-systemd:22.04
+          docker buildx imagetools create -t ghcr.io/pmh-only/ubuntu-systemd:24.04 $digests
+          docker buildx imagetools inspect ghcr.io/pmh-only/ubuntu-systemd:24.04
