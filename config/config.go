@@ -6,16 +6,16 @@ import (
 )
 
 type Config struct {
-	Port           string
-	BaseURL        string
-	OIDCIssuerURL  string
-	OIDCClientID   string
+	Port             string
+	BaseURL          string
+	OIDCIssuerURL    string
+	OIDCClientID     string
 	OIDCClientSecret string
-	SessionSecret  string
-	AdminGroup     string
-	PodNamespace   string
-	PodImage       string
-	PodShell       string
+	SessionSecret    string
+	AdminGroup       string
+	PodNamespace     string
+	PodImage         string
+	PodShell         string
 	PodCPULimit      string
 	PodMemoryLimit   string
 	PodStorageSize   string
@@ -24,20 +24,20 @@ type Config struct {
 
 func Load() (*Config, error) {
 	c := &Config{
-		Port:           getEnv("PORT", "8080"),
-		BaseURL:        getEnv("BASE_URL", "https://run.pmh.codes"),
-		OIDCIssuerURL:  os.Getenv("OIDC_ISSUER_URL"),
-		OIDCClientID:   os.Getenv("OIDC_CLIENT_ID"),
+		Port:             getEnv("PORT", "8080"),
+		BaseURL:          getEnv("BASE_URL", "https://run.pmh.codes"),
+		OIDCIssuerURL:    os.Getenv("OIDC_ISSUER_URL"),
+		OIDCClientID:     os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		SessionSecret:  os.Getenv("SESSION_SECRET"),
-		AdminGroup:     getEnv("ADMIN_GROUP", "authentik Admins"),
-		PodNamespace:   getEnv("POD_NAMESPACE", "run"),
-		PodImage:       os.Getenv("POD_IMAGE"),
-		PodShell:       getEnv("POD_SHELL", "/bin/bash"),
-		PodCPULimit:    getEnv("POD_CPU_LIMIT", "500m"),
-		PodMemoryLimit: getEnv("POD_MEMORY_LIMIT", "256Mi"),
-		PodStorageSize: getEnv("POD_STORAGE_SIZE", "10Gi"),
-		Kubeconfig:     os.Getenv("KUBECONFIG"),
+		SessionSecret:    os.Getenv("SESSION_SECRET"),
+		AdminGroup:       getEnv("ADMIN_GROUP", "admin"),
+		PodNamespace:     getEnv("POD_NAMESPACE", "run"),
+		PodImage:         os.Getenv("POD_IMAGE"),
+		PodShell:         getEnv("POD_SHELL", "/bin/bash"),
+		PodCPULimit:      getEnv("POD_CPU_LIMIT", "500m"),
+		PodMemoryLimit:   getEnv("POD_MEMORY_LIMIT", "256Mi"),
+		PodStorageSize:   getEnv("POD_STORAGE_SIZE", "10Gi"),
+		Kubeconfig:       os.Getenv("KUBECONFIG"),
 	}
 
 	required := map[string]string{
