@@ -186,7 +186,7 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 		))
 	}
 	// Always overwrite apt sources so mirror config stays current with the image.
-	seedCmds.WriteString("cp /etc/apt/sources.list.d/ubuntu.sources /persist/etc/apt/sources.list.d/ubuntu.sources\n")
+	seedCmds.WriteString("cp /etc/apt/sources.list /persist/etc/apt/sources.list\n")
 
 	// Build volumeMounts for main container
 	mounts := []corev1.VolumeMount{}
