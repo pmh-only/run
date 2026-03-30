@@ -24,8 +24,8 @@
       border-bottom: 1px solid #333;
       flex-shrink: 0;
     }
-    #header a { color: #555; text-decoration: none; }
-    #header a:hover { color: #888; }
+    #header a, #restart-btn { color: #555; text-decoration: none; background: none; border: none; font: 12px/1.5 monospace; cursor: pointer; padding: 0; }
+    #header a:hover, #restart-btn:hover { color: #888; }
     #usage { color: #555; margin-right: 12px; }
     #terminal-container {
       flex: 1;
@@ -51,6 +51,7 @@
     <span>run.pmh.codes</span>
     <div style="display:flex;align-items:center;gap:12px;">
       <span id="usage"></span>
+      <button id="restart-btn">restart</button>
       <a href="/auth/logout">logout</a>
     </div>
   </div>

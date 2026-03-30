@@ -100,6 +100,16 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string, st
 	return m.waitForPod(ctx, name, statusFn)
 }
 
+// DeletePod deletes the user's pod so it will be recreated on next EnsurePod call.
+func (m *PodManager) DeletePod(ctx context.Context, userSub string) error {
+	name := PodName(userSub)
+	err := m.client.CoreV1().Pods(m.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete pod: %w", err)
+	}
+	return nil
+}
+
 func (m *PodManager) ensurePVC(ctx context.Context, userSub string) error {
 	name := pvcName(userSub)
 	_, err := m.client.CoreV1().PersistentVolumeClaims(m.namespace).Get(ctx, name, metav1.GetOptions{})

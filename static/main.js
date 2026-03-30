@@ -105,6 +105,18 @@
     };
   }
 
+  const restartBtn = document.getElementById('restart-btn');
+  restartBtn.addEventListener('click', function () {
+    restartBtn.disabled = true;
+    restartBtn.textContent = 'restarting...';
+    fetch('/api/restart', { method: 'POST' }).finally(function () {
+      restartBtn.disabled = false;
+      restartBtn.textContent = 'restart';
+      term.write('\r\n\x1b[33mRestarting...\x1b[0m\r\n');
+      connect();
+    });
+  });
+
   const usageEl = document.getElementById('usage');
 
   function updateUsage() {

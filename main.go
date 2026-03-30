@@ -54,6 +54,21 @@ func main() {
 	// Static assets (xterm.js, CSS - no auth needed for assets)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
+	// Restart API (requires auth)
+	mux.Handle("POST /api/restart", authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessData, err := sess.Get(r)
+		if err != nil {
+			http.Error(w, "session error", http.StatusInternalServerError)
+			return
+		}
+		userSub := session.GetString(sessData, session.KeyUserSub)
+		if err := podManager.DeletePod(r.Context(), userSub); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
 	// Usage API (requires auth)
 	mux.Handle("GET /api/usage", authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessData, err := sess.Get(r)
