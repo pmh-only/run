@@ -105,6 +105,21 @@
     };
   }
 
+  const usageEl = document.getElementById('usage');
+
+  function updateUsage() {
+    fetch('/api/usage').then(function (r) {
+      if (!r.ok) return;
+      return r.json();
+    }).then(function (d) {
+      if (!d || !usageEl) return;
+      usageEl.textContent = 'cpu ' + d.cpu_percent.toFixed(1) + '%  mem ' + d.memory_percent.toFixed(1) + '%';
+    }).catch(function () {});
+  }
+
+  updateUsage();
+  setInterval(updateUsage, 5000);
+
   window.addEventListener('resize', function () {
     fitAddon.fit();
     sendResize();

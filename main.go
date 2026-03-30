@@ -34,6 +34,10 @@ func main() {
 
 	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
 	termHandler := terminal.New(k8sClient, restCfg, podManager, cfg.PodNamespace, cfg.BaseURL)
+	usageHandler, err := k8sclient.NewUsageHandler(restCfg, podManager, cfg.PodNamespace)
+	if err != nil {
+		log.Fatalf("usage handler error: %v", err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -49,6 +53,17 @@ func main() {
 
 	// Static assets (xterm.js, CSS - no auth needed for assets)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	// Usage API (requires auth)
+	mux.Handle("GET /api/usage", authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessData, err := sess.Get(r)
+		if err != nil {
+			http.Error(w, "session error", http.StatusInternalServerError)
+			return
+		}
+		userSub := session.GetString(sessData, session.KeyUserSub)
+		usageHandler.ServeHTTP(w, r, userSub)
+	})))
 
 	// Terminal WebSocket (requires auth)
 	mux.Handle("GET /terminal", authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
