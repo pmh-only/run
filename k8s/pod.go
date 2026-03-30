@@ -109,7 +109,7 @@ func (m *PodManager) ensurePVC(ctx context.Context, userSub string) error {
 		return fmt.Errorf("get pvc: %w", err)
 	}
 
-	storageClass := "local-path"
+	storageClass := "zfs-run"
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
