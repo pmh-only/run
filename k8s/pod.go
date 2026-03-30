@@ -103,7 +103,10 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string, st
 // DeletePod deletes the user's pod so it will be recreated on next EnsurePod call.
 func (m *PodManager) DeletePod(ctx context.Context, userSub string) error {
 	name := PodName(userSub)
-	err := m.client.CoreV1().Pods(m.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	grace := int64(0)
+	err := m.client.CoreV1().Pods(m.namespace).Delete(ctx, name, metav1.DeleteOptions{
+		GracePeriodSeconds: &grace,
+	})
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("delete pod: %w", err)
 	}
