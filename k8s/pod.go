@@ -176,7 +176,8 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 	// Directories to persist (seed from image on first boot)
 	persistDirs := []string{"usr", "etc", "var", "home", "root", "opt", "srv"}
 
-	// Build seed script: copy each dir from image if not already seeded
+	// Build seed script: copy each dir from image if not already seeded,
+	// then always sync files that must stay in sync with the image.
 	var seedCmds strings.Builder
 	for _, dir := range persistDirs {
 		seedCmds.WriteString(fmt.Sprintf(
@@ -184,6 +185,8 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 			dir, dir, dir, dir,
 		))
 	}
+	// Always overwrite apt sources so mirror config stays current with the image.
+	seedCmds.WriteString("cp /etc/apt/sources.list.d/ubuntu.sources /persist/etc/apt/sources.list.d/ubuntu.sources\n")
 
 	// Build volumeMounts for main container
 	mounts := []corev1.VolumeMount{}
