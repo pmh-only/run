@@ -142,13 +142,21 @@
 
   // Usage polling.
   var usageEl = document.getElementById('usage');
+  function colorForPct(pct) {
+    if (pct >= 80) return '#f48771';
+    if (pct >= 50) return '#cca700';
+    return '#89d185';
+  }
   function updateUsage() {
     fetch('/api/usage').then(function (r) {
       return r.ok ? r.json() : null;
     }).then(function (d) {
-      if (d && usageEl) {
-        usageEl.textContent = 'cpu ' + d.cpu_percent.toFixed(1) + '%  mem ' + d.memory_percent.toFixed(1) + '%';
-      }
+      if (!d || !usageEl) return;
+      var cpu = d.cpu_percent.toFixed(1);
+      var mem = d.memory_percent.toFixed(1);
+      usageEl.innerHTML =
+        'cpu <span style="color:' + colorForPct(d.cpu_percent) + '">' + cpu + '%</span>' +
+        '&nbsp;&nbsp;mem <span style="color:' + colorForPct(d.memory_percent) + '">' + mem + '%</span>';
     }).catch(function () {});
   }
   updateUsage();
