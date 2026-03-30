@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -70,20 +71,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 	}
 	defer conn.Close()
 
-	writeStatus := func(msg string) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\033[33m"+msg+"\033[0m\r\n"))
+	writeLine := func(msg string) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"+msg+"\r\n"))
 	}
 
-	writeStatus("Starting your environment, please wait...")
+	// progressBar renders an ANSI progress bar that overwrites the current line.
+	progressBar := func(pct int, msg string) {
+		const width = 24
+		filled := pct * width / 100
+		bar := "\r\033[K\033[33m["
+		for i := 0; i < width; i++ {
+			if i < filled {
+				bar += "█"
+			} else {
+				bar += "░"
+			}
+		}
+		bar += fmt.Sprintf("] %3d%%\033[0m  %s", pct, msg)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(bar))
+	}
 
-	pod, err := h.podManager.EnsurePod(r.Context(), userSub, username)
+	writeLine("\033[33mStarting your environment...\033[0m")
+	progressBar(0, "Initializing...")
+
+	pod, err := h.podManager.EnsurePod(r.Context(), userSub, username, func(pct int, msg string) {
+		progressBar(pct, msg)
+	})
 	if err != nil {
 		log.Printf("ensure pod error for user %s: %v", userSub, err)
-		writeStatus("Failed to start pod: " + err.Error())
+		writeLine("\033[31mFailed to start pod: " + err.Error() + "\033[0m")
 		return
 	}
 
-	writeStatus("Connecting...")
+	progressBar(100, "Connected!")
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"))
 
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
@@ -150,7 +171,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 	exec, err := remotecommand.NewSPDYExecutor(h.restCfg, "POST", req.URL())
 	if err != nil {
 		log.Printf("spdy executor error: %v", err)
-		writeStatus("Failed to connect to pod: " + err.Error())
+		writeLine("\033[31mFailed to connect to pod: " + err.Error() + "\033[0m")
 		return
 	}
 

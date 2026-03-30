@@ -60,7 +60,8 @@ func pvcName(sub string) string {
 }
 
 // EnsurePod returns a running pod for the user, creating one if needed.
-func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string) (*corev1.Pod, error) {
+// statusFn is called with progress (0-100) and a description during startup; may be nil.
+func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string, statusFn func(int, string)) (*corev1.Pod, error) {
 	if err := m.ensurePVC(ctx, userSub); err != nil {
 		return nil, fmt.Errorf("ensure pvc: %w", err)
 	}
@@ -82,7 +83,7 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string) (*
 				return nil, fmt.Errorf("delete terminal pod: %w", delErr)
 			}
 		default:
-			return m.waitForPod(ctx, name)
+			return m.waitForPod(ctx, name, statusFn)
 		}
 	}
 
@@ -90,13 +91,13 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string) (*
 	created, err := m.client.CoreV1().Pods(m.namespace).Create(ctx, newPod, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			return m.waitForPod(ctx, name)
+			return m.waitForPod(ctx, name, statusFn)
 		}
 		return nil, fmt.Errorf("create pod: %w", err)
 	}
 
 	log.Printf("created pod %s for user sub %s", created.Name, userSub)
-	return m.waitForPod(ctx, name)
+	return m.waitForPod(ctx, name, statusFn)
 }
 
 func (m *PodManager) ensurePVC(ctx context.Context, userSub string) error {
@@ -133,7 +134,7 @@ func (m *PodManager) ensurePVC(ctx context.Context, userSub string) error {
 	return nil
 }
 
-func (m *PodManager) waitForPod(ctx context.Context, name string) (*corev1.Pod, error) {
+func (m *PodManager) waitForPod(ctx context.Context, name string, statusFn func(int, string)) (*corev1.Pod, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -144,6 +145,12 @@ func (m *PodManager) waitForPod(ctx context.Context, name string) (*corev1.Pod, 
 		return nil, fmt.Errorf("watch pod: %w", err)
 	}
 	defer watcher.Stop()
+
+	report := func(pct int, msg string) {
+		if statusFn != nil {
+			statusFn(pct, msg)
+		}
+	}
 
 	for {
 		select {
@@ -166,8 +173,54 @@ func (m *PodManager) waitForPod(ctx context.Context, name string) (*corev1.Pod, 
 			case corev1.PodFailed, corev1.PodSucceeded:
 				return nil, fmt.Errorf("pod %s entered terminal phase %s", name, pod.Status.Phase)
 			}
+			report(podProgress(pod))
 		}
 	}
+}
+
+// podProgress returns a progress percentage and label based on pod status.
+func podProgress(pod *corev1.Pod) (int, string) {
+	// Check if scheduled
+	scheduled := false
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionTrue {
+			scheduled = true
+			break
+		}
+	}
+	if !scheduled {
+		return 5, "Waiting for node..."
+	}
+
+	// Walk init container statuses in order
+	initLabels := []string{"seed-rootfs", "setup-user"}
+	initPcts := []int{20, 55}
+	donePcts := []int{50, 80}
+
+	for i, s := range pod.Status.InitContainerStatuses {
+		label := s.Name
+		if i < len(initLabels) {
+			label = initLabels[i]
+		}
+		if s.State.Waiting != nil {
+			return initPcts[i], label + ": waiting..."
+		}
+		if s.State.Running != nil {
+			return initPcts[i], label + ": running..."
+		}
+		if s.State.Terminated == nil {
+			return initPcts[i], label + ": starting..."
+		}
+		// this init container is done, report its done pct before moving on
+		if i == len(pod.Status.InitContainerStatuses)-1 {
+			return donePcts[i], label + ": done"
+		}
+	}
+
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return 10, "Scheduling..."
+	}
+	return 85, "Starting environment..."
 }
 
 func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
