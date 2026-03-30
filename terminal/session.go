@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -169,6 +170,18 @@ type sessionManager struct {
 
 func newSessionManager() *sessionManager {
 	return &sessionManager{sessions: make(map[string]*session)}
+}
+
+// purgeUser removes all sessions belonging to userSub (keys of the form "userSub:N").
+func (sm *sessionManager) purgeUser(userSub string) {
+	prefix := userSub + ":"
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for key := range sm.sessions {
+		if strings.HasPrefix(key, prefix) {
+			delete(sm.sessions, key)
+		}
+	}
 }
 
 // getOrCreate returns the existing alive session for key, or calls create() to make one.

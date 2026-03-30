@@ -154,16 +154,20 @@
   updateUsage();
   setInterval(updateUsage, 5000);
 
-  // Restart button — deletes pod and reconnects all active tabs.
+  // Restart button — purges sessions + deletes pod, then auto-reconnects.
   var restartBtn = document.getElementById('restart-btn');
   restartBtn.addEventListener('click', function () {
     restartBtn.disabled = true;
     restartBtn.textContent = 'restarting...';
+
+    // Snapshot which tabs were connected before we tear them down.
+    var wasConnected = tabs.map(function (t) { return t.ws !== null; });
+
     fetch('/api/restart', { method: 'POST' }).finally(function () {
       restartBtn.disabled = false;
       restartBtn.textContent = 'restart';
       for (var i = 0; i < NUM_TABS; i++) {
-        if (tabs[i].ws) {
+        if (wasConnected[i]) {
           tabs[i].term.write('\r\n\x1b[33mRestarting...\x1b[0m\r\n');
           connectTab(i);
         }

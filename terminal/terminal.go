@@ -61,6 +61,17 @@ func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.Pod
 	}
 }
 
+// Restart purges all sessions for the user and deletes the pod so the next
+// connection starts fresh.
+func (h *Handler) Restart(w http.ResponseWriter, r *http.Request, userSub string) {
+	h.sessions.purgeUser(userSub)
+	if err := h.podManager.DeletePod(r.Context(), userSub); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ServeHTTP upgrades to WebSocket, then attaches the connection to the user's
 // persistent exec session (creating pod + session on first connect).
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, username string) {

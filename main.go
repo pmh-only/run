@@ -62,11 +62,7 @@ func main() {
 			return
 		}
 		userSub := session.GetString(sessData, session.KeyUserSub)
-		if err := podManager.DeletePod(r.Context(), userSub); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		termHandler.Restart(w, r, userSub)
 	})))
 
 	// Usage API (requires auth)
