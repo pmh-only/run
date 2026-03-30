@@ -185,8 +185,13 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 			dir, dir, dir, dir,
 		))
 	}
-	// Always overwrite apt sources so mirror config stays current with the image.
-	seedCmds.WriteString("cp /etc/apt/sources.list /persist/etc/apt/sources.list\n")
+	// Always overwrite apt sources with KAIST mirror regardless of what was seeded.
+	seedCmds.WriteString(`sed -i \
+  -e 's|http://archive.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
+  -e 's|http://security.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
+  -e 's|http://ports.ubuntu.com/ubuntu-ports|https://ftp.kaist.ac.kr/ubuntu-ports|g' \
+  /persist/etc/apt/sources.list 2>/dev/null || true
+`)
 
 	// Build volumeMounts for main container
 	mounts := []corev1.VolumeMount{}
@@ -220,16 +225,18 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 			},
 			InitContainers: []corev1.Container{
 				{
-					Name:    "seed-rootfs",
-					Image:   m.image,
-					Command: []string{"/bin/sh", "-c", seedCmds.String()},
+					Name:            "seed-rootfs",
+					Image:           m.image,
+					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"/bin/sh", "-c", seedCmds.String()},
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "storage", MountPath: "/persist"},
 					},
 				},
 				{
-					Name:  "setup-user",
-					Image: m.image,
+					Name:            "setup-user",
+					Image:           m.image,
+					ImagePullPolicy: corev1.PullAlways,
 					Command: []string{"/bin/bash", "-c", fmt.Sprintf(`
 USERNAME=%q
 id "$USERNAME" >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash "$USERNAME"
@@ -244,8 +251,9 @@ echo "run.pmh.codes" > /etc/hostname
 			},
 			Containers: []corev1.Container{
 				{
-					Name:  "shell",
-					Image: m.image,
+					Name:            "shell",
+					Image:           m.image,
+					ImagePullPolicy: corev1.PullAlways,
 					// Remount cgroup2 rw before exec'ing systemd as PID 1.
 					// k3s mounts /sys/fs/cgroup ro for non-privileged containers.
 					Command: []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; hostname run.pmh.codes 2>/dev/null; exec /sbin/init"},
