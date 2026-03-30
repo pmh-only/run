@@ -232,6 +232,7 @@ USERNAME=%q
 id "$USERNAME" >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash "$USERNAME"
 echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
 chmod 440 /etc/sudoers.d/"$USERNAME"
+echo "run.pmh.codes" > /etc/hostname
 `, username)},
 					VolumeMounts: append(mounts, corev1.VolumeMount{
 						Name: "storage", MountPath: "/persist",
@@ -244,7 +245,7 @@ chmod 440 /etc/sudoers.d/"$USERNAME"
 					Image: m.image,
 					// Remount cgroup2 rw before exec'ing systemd as PID 1.
 					// k3s mounts /sys/fs/cgroup ro for non-privileged containers.
-					Command: []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init"},
+					Command: []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; hostname run.pmh.codes 2>/dev/null; exec /sbin/init"},
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse(m.cpuLimit),
