@@ -40,7 +40,10 @@ RUN apt-get update && \
         systemd-networkd-wait-online.service \
         systemd-resolved.service \
         systemd-sysusers.service; \
-    do ln -sf /dev/null /etc/systemd/system/$unit; done
+    do ln -sf /dev/null /etc/systemd/system/$unit; done \
+    && mkdir -p /etc/systemd/system.conf.d \
+    && printf '[Manager]\nDefaultEnvironment=SYSTEMD_SANDBOX=0\n' \
+        > /etc/systemd/system.conf.d/50-container.conf
 
 ENV LANG=en_US.UTF-8
 
