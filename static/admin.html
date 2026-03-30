@@ -25,6 +25,13 @@
   <meta property="og:image:alt" content="Desktop computer emoji">
   <meta property="og:locale" content="en_US">
 
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="run">
+
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="admin — run.pmh.codes">
@@ -214,5 +221,6 @@
   </div>
 
   <script src="/static/admin.js"></script>
+  <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
 </body>
 </html>

@@ -65,6 +65,13 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Service worker — must be served from root, not /static/, to scope the whole app
+	mux.HandleFunc("GET /sw.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Service-Worker-Allowed", "/")
+		w.Header().Set("Content-Type", "application/javascript")
+		http.ServeFile(w, r, "static/sw.js")
+	})
+
 	// Health check (no auth)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
