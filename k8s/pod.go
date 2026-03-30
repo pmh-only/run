@@ -243,6 +243,7 @@ id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
 echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
 chmod 440 /etc/sudoers.d/"$USERNAME"
 echo "run.pmh.codes" > /etc/hostname
+ln -sf /dev/null /etc/systemd/system/systemd-logind.service
 `, username)},
 					VolumeMounts: append(mounts, corev1.VolumeMount{
 						Name: "storage", MountPath: "/persist",
