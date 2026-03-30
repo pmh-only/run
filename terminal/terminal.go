@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/gorilla/websocket"
 	"k8s.io/client-go/kubernetes"
@@ -89,7 +90,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(bar))
 	}
 
-	sess, err := h.sessions.getOrCreate(userSub, func() (*session, error) {
+	tabIdx, _ := strconv.Atoi(r.URL.Query().Get("tab"))
+	if tabIdx < 0 || tabIdx > 5 {
+		tabIdx = 0
+	}
+	sessionKey := fmt.Sprintf("%s:%d", userSub, tabIdx)
+
+	sess, err := h.sessions.getOrCreate(sessionKey, func() (*session, error) {
 		writeLine("\033[33mStarting your environment...\033[0m")
 		progressBar(0, "Initializing...")
 

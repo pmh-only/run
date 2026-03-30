@@ -171,11 +171,11 @@ func newSessionManager() *sessionManager {
 	return &sessionManager{sessions: make(map[string]*session)}
 }
 
-// getOrCreate returns the existing alive session for userSub, or calls create() to make one.
+// getOrCreate returns the existing alive session for key, or calls create() to make one.
 // create() is called outside the lock so pod creation doesn't block other users.
-func (sm *sessionManager) getOrCreate(userSub string, create func() (*session, error)) (*session, error) {
+func (sm *sessionManager) getOrCreate(key string, create func() (*session, error)) (*session, error) {
 	sm.mu.Lock()
-	if s, ok := sm.sessions[userSub]; ok && s.isAlive() {
+	if s, ok := sm.sessions[key]; ok && s.isAlive() {
 		sm.mu.Unlock()
 		return s, nil
 	}
@@ -187,7 +187,7 @@ func (sm *sessionManager) getOrCreate(userSub string, create func() (*session, e
 	}
 
 	sm.mu.Lock()
-	sm.sessions[userSub] = s
+	sm.sessions[key] = s
 	sm.mu.Unlock()
 	return s, nil
 }
