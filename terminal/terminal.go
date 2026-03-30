@@ -3,15 +3,12 @@ package terminal
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
 
 	"github.com/gorilla/websocket"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
@@ -36,6 +33,7 @@ type Handler struct {
 	podManager *k8s.PodManager
 	namespace  string
 	upgrader   websocket.Upgrader
+	sessions   *sessionManager
 }
 
 func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.PodManager, namespace, baseURL string) *Handler {
@@ -45,6 +43,7 @@ func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.Pod
 		restCfg:    restCfg,
 		podManager: podManager,
 		namespace:  namespace,
+		sessions:   newSessionManager(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				o := r.Header.Get("Origin")
@@ -61,8 +60,8 @@ func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.Pod
 	}
 }
 
-// ServeHTTP upgrades to WebSocket immediately, then waits for the pod and
-// connects to it — keeping the browser connection alive during pod startup.
+// ServeHTTP upgrades to WebSocket, then attaches the connection to the user's
+// persistent exec session (creating pod + session on first connect).
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, username string) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -75,7 +74,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"+msg+"\r\n"))
 	}
 
-	// progressBar renders an ANSI progress bar that overwrites the current line.
 	progressBar := func(pct int, msg string) {
 		const width = 24
 		filled := pct * width / 100
@@ -91,101 +89,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(bar))
 	}
 
-	writeLine("\033[33mStarting your environment...\033[0m")
-	progressBar(0, "Initializing...")
+	sess, err := h.sessions.getOrCreate(userSub, func() (*session, error) {
+		writeLine("\033[33mStarting your environment...\033[0m")
+		progressBar(0, "Initializing...")
 
-	pod, err := h.podManager.EnsurePod(r.Context(), userSub, username, func(pct int, msg string) {
-		progressBar(pct, msg)
+		pod, err := h.podManager.EnsurePod(r.Context(), userSub, username, func(pct int, msg string) {
+			progressBar(pct, msg)
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		progressBar(100, "Connected!")
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"))
+
+		return newSession(h.client, h.restCfg, h.namespace, pod.Name, username)
 	})
 	if err != nil {
-		log.Printf("ensure pod error for user %s: %v", userSub, err)
-		writeLine("\033[31mFailed to start pod: " + err.Error() + "\033[0m")
+		log.Printf("session error for user %s: %v", userSub, err)
+		writeLine("\033[31mFailed to start session: " + err.Error() + "\033[0m")
 		return
 	}
 
-	progressBar(100, "Connected!")
-	_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"))
+	sess.attach(conn)
+	defer sess.detach(conn)
 
-	stdinReader, stdinWriter := io.Pipe()
-	stdoutReader, stdoutWriter := io.Pipe()
-
-	// Relay stdout/stderr from pod to browser
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := stdoutReader.Read(buf)
-			if n > 0 {
-				msg := make([]byte, n+1)
-				msg[0] = msgData
-				copy(msg[1:], buf[:n])
-				if werr := conn.WriteMessage(websocket.BinaryMessage, msg); werr != nil {
-					break
-				}
-			}
-			if err != nil {
-				break
+	// Read loop: forward input and resize events to the session.
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		if len(msg) == 0 {
+			continue
+		}
+		switch msg[0] {
+		case msgData:
+			sess.writeStdin(msg[1:])
+		case msgResize:
+			var rm resizeMsg
+			if err := json.Unmarshal(msg[1:], &rm); err == nil {
+				sess.resize(rm.Cols, rm.Rows)
 			}
 		}
-	}()
-
-	// Relay browser input to pod stdin
-	sizeQueue := newSizeQueue()
-	go func() {
-		defer stdinWriter.Close()
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				break
-			}
-			if len(msg) == 0 {
-				continue
-			}
-			switch msg[0] {
-			case msgData:
-				if _, err := stdinWriter.Write(msg[1:]); err != nil {
-					return
-				}
-			case msgResize:
-				var rm resizeMsg
-				if err := json.Unmarshal(msg[1:], &rm); err == nil {
-					sizeQueue.push(remotecommand.TerminalSize{Width: rm.Cols, Height: rm.Rows})
-				}
-			}
-		}
-	}()
-
-	req := h.client.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(pod.Name).
-		Namespace(h.namespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: "shell",
-			Command:   []string{"su", "-", username},
-			Stdin:     true,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       true,
-		}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(h.restCfg, "POST", req.URL())
-	if err != nil {
-		log.Printf("spdy executor error: %v", err)
-		writeLine("\033[31mFailed to connect to pod: " + err.Error() + "\033[0m")
-		return
 	}
-
-	err = exec.StreamWithContext(r.Context(), remotecommand.StreamOptions{
-		Stdin:             stdinReader,
-		Stdout:            stdoutWriter,
-		Stderr:            stdoutWriter,
-		Tty:               true,
-		TerminalSizeQueue: sizeQueue,
-	})
-	if err != nil && err != io.EOF {
-		log.Printf("exec stream error: %v", err)
-	}
-	stdoutWriter.Close()
 }
 
 // sizeQueue implements remotecommand.TerminalSizeQueue using a buffered channel.
