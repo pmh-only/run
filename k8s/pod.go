@@ -243,8 +243,6 @@ id "$USERNAME" >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash "$USERNAME"
 echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
 chmod 440 /etc/sudoers.d/"$USERNAME"
 echo "run.pmh.codes" > /etc/hostname
-mkdir -p /etc/systemd/system.conf.d
-printf '[Manager]\nDefaultEnvironment=SYSTEMD_SANDBOX=0\n' > /etc/systemd/system.conf.d/50-container.conf
 `, username)},
 					VolumeMounts: append(mounts, corev1.VolumeMount{
 						Name: "storage", MountPath: "/persist",
