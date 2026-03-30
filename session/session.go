@@ -13,6 +13,7 @@ const (
 	KeyUserSub    = "user_sub"
 	KeyUserEmail  = "user_email"
 	KeyUsername   = "username"
+	KeyIsAdmin    = "is_admin"
 	KeyOAuthState = "oauth_state"
 	KeyOAuthNonce = "oauth_nonce"
 )
@@ -45,5 +46,10 @@ func (s *Store) Save(r *http.Request, w http.ResponseWriter, sess *sessions.Sess
 
 func GetString(sess *sessions.Session, key string) string {
 	v, _ := sess.Values[key].(string)
+	return v
+}
+
+func GetBool(sess *sessions.Session, key string) bool {
+	v, _ := sess.Values[key].(bool)
 	return v
 }

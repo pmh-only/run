@@ -1,6 +1,7 @@
 (function () {
   const MSG_DATA = 0x00;
   const MSG_RESIZE = 0x01;
+  const MSG_PING = 0x02;
   const NUM_TABS = 6;
 
   const termOptions = {
@@ -92,7 +93,14 @@
     tab.ws.onmessage = function (evt) {
       if (evt.data instanceof ArrayBuffer) {
         var arr = new Uint8Array(evt.data);
-        if (arr[0] === MSG_DATA) tab.term.write(arr.slice(1));
+        if (arr[0] === MSG_DATA) {
+          tab.term.write(arr.slice(1));
+        } else if (arr[0] === MSG_PING) {
+          try {
+            var d = JSON.parse(new TextDecoder().decode(arr.slice(1)));
+            updateUsageDisplay(d);
+          } catch (_) {}
+        }
       } else {
         tab.term.write(evt.data);
       }
@@ -140,27 +148,21 @@
     sendResize(activeTab);
   });
 
-  // Usage polling.
+  // Usage display — updated via MSG_PING responses from the WebSocket.
   var usageEl = document.getElementById('usage');
   function colorForPct(pct) {
     if (pct >= 80) return '#f48771';
     if (pct >= 50) return '#cca700';
     return '#89d185';
   }
-  function updateUsage() {
-    fetch('/api/usage').then(function (r) {
-      return r.ok ? r.json() : null;
-    }).then(function (d) {
-      if (!d || !usageEl) return;
-      var cpu = d.cpu_percent.toFixed(1);
-      var mem = d.memory_percent.toFixed(1);
-      usageEl.innerHTML =
-        'cpu <span style="color:' + colorForPct(d.cpu_percent) + '">' + cpu + '%</span>' +
-        '&nbsp;&nbsp;mem <span style="color:' + colorForPct(d.memory_percent) + '">' + mem + '%</span>';
-    }).catch(function () {});
+  function updateUsageDisplay(d) {
+    if (!d || !usageEl) return;
+    var cpu = d.cpu_percent.toFixed(1);
+    var mem = d.memory_percent.toFixed(1);
+    usageEl.innerHTML =
+      'cpu <span style="color:' + colorForPct(d.cpu_percent) + '">' + cpu + '%</span>' +
+      '&nbsp;&nbsp;mem <span style="color:' + colorForPct(d.memory_percent) + '">' + mem + '%</span>';
   }
-  updateUsage();
-  setInterval(updateUsage, 5000);
 
   // Restart button — purges sessions + deletes pod, then auto-reconnects.
   var restartBtn = document.getElementById('restart-btn');

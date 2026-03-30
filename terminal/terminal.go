@@ -1,12 +1,14 @@
 package terminal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"k8s.io/client-go/kubernetes"
@@ -17,10 +19,11 @@ import (
 )
 
 // Message prefixes for the WebSocket framing protocol.
-// \x00 = stdin/stdout data, \x01 = resize event JSON
+// \x00 = stdin/stdout data, \x01 = resize event JSON, \x02 = ping (server replies \x02+usage JSON)
 const (
 	msgData   = 0x00
 	msgResize = 0x01
+	msgPing   = 0x02
 )
 
 type resizeMsg struct {
@@ -32,17 +35,19 @@ type Handler struct {
 	client     *kubernetes.Clientset
 	restCfg    *rest.Config
 	podManager *k8s.PodManager
+	usage      *k8s.UsageHandler
 	namespace  string
 	upgrader   websocket.Upgrader
 	sessions   *sessionManager
 }
 
-func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.PodManager, namespace, baseURL string) *Handler {
+func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.PodManager, usage *k8s.UsageHandler, namespace, baseURL string) *Handler {
 	origin, _ := url.Parse(baseURL)
 	return &Handler{
 		client:     client,
 		restCfg:    restCfg,
 		podManager: podManager,
+		usage:      usage,
 		namespace:  namespace,
 		sessions:   newSessionManager(),
 		upgrader: websocket.Upgrader{
@@ -59,6 +64,11 @@ func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.Pod
 			},
 		},
 	}
+}
+
+// ConnectedUsers returns the set of userSubs with at least one active WebSocket connection.
+func (h *Handler) ConnectedUsers() map[string]bool {
+	return h.sessions.connectedUsers()
 }
 
 // Restart purges all sessions for the user and deletes the pod so the next
@@ -131,6 +141,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 
 	sess.attach(conn)
 	defer sess.detach(conn)
+
+	// Push usage to the client periodically so it doubles as a keepalive.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				u, err := h.usage.GetUsage(ctx, userSub)
+				if err != nil {
+					continue
+				}
+				payload, err := json.Marshal(u)
+				if err != nil {
+					continue
+				}
+				out := make([]byte, 1+len(payload))
+				out[0] = msgPing
+				copy(out[1:], payload)
+				sess.writeWS(websocket.BinaryMessage, out)
+			}
+		}
+	}()
 
 	// Read loop: forward input and resize events to the session.
 	for {

@@ -20,6 +20,7 @@ const scrollbackSize = 64 * 1024 // 64 KB
 // session holds a running exec for one user, independent of any WS connection.
 type session struct {
 	mu          sync.Mutex
+	writeMu     sync.Mutex // serializes WebSocket writes
 	stdinWriter io.WriteCloser
 	scrollback  []byte
 	wsConn      *websocket.Conn // currently attached WS; nil when nobody is connected
@@ -81,23 +82,18 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		for {
 			n, err := stdoutReader.Read(buf)
 			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
+				msg := make([]byte, n+1)
+				msg[0] = msgData
+				copy(msg[1:], buf[:n])
 
 				s.mu.Lock()
-				s.scrollback = append(s.scrollback, data...)
+				s.scrollback = append(s.scrollback, buf[:n]...)
 				if len(s.scrollback) > scrollbackSize {
 					s.scrollback = s.scrollback[len(s.scrollback)-scrollbackSize:]
 				}
-				conn := s.wsConn
 				s.mu.Unlock()
 
-				if conn != nil {
-					msg := make([]byte, n+1)
-					msg[0] = msgData
-					copy(msg[1:], data)
-					_ = conn.WriteMessage(websocket.BinaryMessage, msg)
-				}
+				s.writeWS(websocket.BinaryMessage, msg)
 			}
 			if err != nil {
 				break
@@ -109,11 +105,27 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		s.wsConn = nil
 		s.mu.Unlock()
 		if conn != nil {
+			s.writeMu.Lock()
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\033[31mSession ended.\033[0m\r\n"))
+			s.writeMu.Unlock()
 		}
 	}()
 
 	return s, nil
+}
+
+// writeWS sends a message to the currently attached WebSocket connection.
+// Safe to call concurrently with other writeWS calls.
+func (s *session) writeWS(msgType int, msg []byte) {
+	s.mu.Lock()
+	conn := s.wsConn
+	s.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	s.writeMu.Lock()
+	_ = conn.WriteMessage(msgType, msg)
+	s.writeMu.Unlock()
 }
 
 // attach sets conn as the current WS for this session.
@@ -182,6 +194,27 @@ func (sm *sessionManager) purgeUser(userSub string) {
 			delete(sm.sessions, key)
 		}
 	}
+}
+
+// connectedUsers returns the set of userSubs that have at least one active WS connection.
+func (sm *sessionManager) connectedUsers() map[string]bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	users := make(map[string]bool)
+	for key, s := range sm.sessions {
+		idx := strings.LastIndex(key, ":")
+		if idx < 0 {
+			continue
+		}
+		userSub := key[:idx]
+		s.mu.Lock()
+		connected := s.wsConn != nil
+		s.mu.Unlock()
+		if connected {
+			users[userSub] = true
+		}
+	}
+	return users
 }
 
 // getOrCreate returns the existing alive session for key, or calls create() to make one.

@@ -100,6 +100,36 @@ func (m *PodManager) EnsurePod(ctx context.Context, userSub, username string, st
 	return m.waitForPod(ctx, name, statusFn)
 }
 
+// PodSummary is a lightweight view of a user's pod for the admin overview.
+type PodSummary struct {
+	Name      string
+	UserSub   string
+	Username  string
+	Phase     string
+	StartTime *metav1.Time
+}
+
+// ListPods returns a summary of all run pods in the namespace.
+func (m *PodManager) ListPods(ctx context.Context) ([]PodSummary, error) {
+	list, err := m.client.CoreV1().Pods(m.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=run",
+	})
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]PodSummary, 0, len(list.Items))
+	for _, pod := range list.Items {
+		summaries = append(summaries, PodSummary{
+			Name:      pod.Name,
+			UserSub:   pod.Annotations["run/user-sub"],
+			Username:  pod.Annotations["run/username"],
+			Phase:     string(pod.Status.Phase),
+			StartTime: pod.Status.StartTime,
+		})
+	}
+	return summaries, nil
+}
+
 // DeletePod deletes the user's pod so it will be recreated on next EnsurePod call.
 func (m *PodManager) DeletePod(ctx context.Context, userSub string) error {
 	name := PodName(userSub)
@@ -279,6 +309,7 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 			},
 			Annotations: map[string]string{
 				"run/user-sub": userSub,
+				"run/username": username,
 			},
 		},
 		Spec: corev1.PodSpec{

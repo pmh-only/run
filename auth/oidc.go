@@ -51,7 +51,7 @@ func New(ctx context.Context, cfg *config.Config, sess *session.Store) (*Handler
 		ClientSecret: cfg.OIDCClientSecret,
 		RedirectURL:  cfg.BaseURL + "/auth/callback",
 		Endpoint:     provider.Endpoint(),
-		Scopes:       []string{gooidc.ScopeOpenID, "email", "profile"},
+		Scopes:       []string{gooidc.ScopeOpenID, "email", "profile", "groups"},
 	}
 
 	verifier := provider.Verifier(&gooidc.Config{ClientID: cfg.OIDCClientID})
@@ -132,10 +132,11 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var claims struct {
-		Sub               string `json:"sub"`
-		Email             string `json:"email"`
-		PreferredUsername string `json:"preferred_username"`
-		Name              string `json:"name"`
+		Sub               string   `json:"sub"`
+		Email             string   `json:"email"`
+		PreferredUsername string   `json:"preferred_username"`
+		Name              string   `json:"name"`
+		Groups            []string `json:"groups"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		http.Error(w, "claims error", http.StatusInternalServerError)
@@ -151,12 +152,21 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	username := sanitizeUsername(raw)
 
+	isAdmin := false
+	for _, g := range claims.Groups {
+		if g == h.cfg.AdminGroup {
+			isAdmin = true
+			break
+		}
+	}
+
 	// Clear temporary OAuth state, store user identity
 	delete(sess.Values, session.KeyOAuthState)
 	delete(sess.Values, session.KeyOAuthNonce)
 	sess.Values[session.KeyUserSub] = claims.Sub
 	sess.Values[session.KeyUserEmail] = claims.Email
 	sess.Values[session.KeyUsername] = username
+	sess.Values[session.KeyIsAdmin] = isAdmin
 
 	if err := h.sessions.Save(r, w, sess); err != nil {
 		http.Error(w, "session save error", http.StatusInternalServerError)

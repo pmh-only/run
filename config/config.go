@@ -12,6 +12,7 @@ type Config struct {
 	OIDCClientID   string
 	OIDCClientSecret string
 	SessionSecret  string
+	AdminGroup     string
 	PodNamespace   string
 	PodImage       string
 	PodShell       string
@@ -29,6 +30,7 @@ func Load() (*Config, error) {
 		OIDCClientID:   os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		SessionSecret:  os.Getenv("SESSION_SECRET"),
+		AdminGroup:     getEnv("ADMIN_GROUP", "authentik Admins"),
 		PodNamespace:   getEnv("POD_NAMESPACE", "run"),
 		PodImage:       os.Getenv("POD_IMAGE"),
 		PodShell:       getEnv("POD_SHELL", "/bin/bash"),

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"run.pmh.codes/run/auth"
 	"run.pmh.codes/run/config"
@@ -33,10 +35,32 @@ func main() {
 	}
 
 	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
-	termHandler := terminal.New(k8sClient, restCfg, podManager, cfg.PodNamespace, cfg.BaseURL)
 	usageHandler, err := k8sclient.NewUsageHandler(restCfg, podManager, cfg.PodNamespace)
 	if err != nil {
 		log.Fatalf("usage handler error: %v", err)
+	}
+	termHandler := terminal.New(k8sClient, restCfg, podManager, usageHandler, cfg.PodNamespace, cfg.BaseURL)
+
+	// requireAdmin wraps a handler to only allow authenticated admin users.
+	requireAdmin := func(next http.Handler) http.Handler {
+		return authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sessData, err := sess.Get(r)
+			if err != nil || !session.GetBool(sessData, session.KeyIsAdmin) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}))
+	}
+
+	type userOverview struct {
+		Username      string  `json:"username"`
+		PodName       string  `json:"pod_name"`
+		PodPhase      string  `json:"pod_phase"`
+		PodAgeSeconds int64   `json:"pod_age_seconds"`
+		CPUPercent    float64 `json:"cpu_percent"`
+		MemoryPercent float64 `json:"memory_percent"`
+		Connected     bool    `json:"connected"`
 	}
 
 	mux := http.NewServeMux()
@@ -74,6 +98,48 @@ func main() {
 		}
 		userSub := session.GetString(sessData, session.KeyUserSub)
 		usageHandler.ServeHTTP(w, r, userSub)
+	})))
+
+	// Admin UI (requires admin)
+	mux.Handle("GET /admin", requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/admin.html")
+	})))
+
+	// Admin overview API (requires admin)
+	mux.Handle("GET /api/admin/overview", requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pods, err := podManager.ListPods(r.Context())
+		if err != nil {
+			http.Error(w, "failed to list pods", http.StatusInternalServerError)
+			return
+		}
+
+		allUsage, _ := usageHandler.GetAllUsage(r.Context())
+		if allUsage == nil {
+			allUsage = make(map[string]*k8sclient.UsageResponse)
+		}
+
+		connected := termHandler.ConnectedUsers()
+
+		result := make([]userOverview, 0, len(pods))
+		for _, pod := range pods {
+			ov := userOverview{
+				Username:  pod.Username,
+				PodName:   pod.Name,
+				PodPhase:  pod.Phase,
+				Connected: connected[pod.UserSub],
+			}
+			if pod.StartTime != nil {
+				ov.PodAgeSeconds = int64(time.Since(pod.StartTime.Time).Seconds())
+			}
+			if u, ok := allUsage[pod.Name]; ok {
+				ov.CPUPercent = u.CPUPercent
+				ov.MemoryPercent = u.MemoryPercent
+			}
+			result = append(result, ov)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
 	})))
 
 	// Terminal WebSocket (requires auth)

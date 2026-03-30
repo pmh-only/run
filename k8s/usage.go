@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,10 +18,17 @@ type UsageResponse struct {
 	MemoryPercent float64 `json:"memory_percent"`
 }
 
+type usageCache struct {
+	resp      UsageResponse
+	expiresAt time.Time
+}
+
 type UsageHandler struct {
 	metrics   *metricsv1beta1.Clientset
 	pods      *PodManager
 	namespace string
+	mu        sync.Mutex
+	cache     map[string]usageCache
 }
 
 func NewUsageHandler(restCfg *rest.Config, pods *PodManager, namespace string) (*UsageHandler, error) {
@@ -27,24 +36,43 @@ func NewUsageHandler(restCfg *rest.Config, pods *PodManager, namespace string) (
 	if err != nil {
 		return nil, err
 	}
-	return &UsageHandler{metrics: mc, pods: pods, namespace: namespace}, nil
+	return &UsageHandler{metrics: mc, pods: pods, namespace: namespace, cache: make(map[string]usageCache)}, nil
 }
 
-func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub string) {
-	name := PodName(userSub)
+// GetUsage returns cached usage (5s TTL) to avoid hammering the metrics server
+// when multiple tabs ping simultaneously.
+func (h *UsageHandler) GetUsage(ctx context.Context, userSub string) (*UsageResponse, error) {
+	h.mu.Lock()
+	if c, ok := h.cache[userSub]; ok && time.Now().Before(c.expiresAt) {
+		h.mu.Unlock()
+		resp := c.resp
+		return &resp, nil
+	}
+	h.mu.Unlock()
 
-	// Get actual usage from metrics-server
-	podMetrics, err := h.metrics.MetricsV1beta1().PodMetricses(h.namespace).Get(context.Background(), name, metav1.GetOptions{})
+	resp, err := h.fetchUsage(ctx, userSub)
 	if err != nil {
-		http.Error(w, "metrics unavailable", http.StatusServiceUnavailable)
-		return
+		return nil, err
 	}
 
-	// Get limits from pod spec
-	pod, err := h.pods.client.CoreV1().Pods(h.namespace).Get(context.Background(), name, metav1.GetOptions{})
+	h.mu.Lock()
+	h.cache[userSub] = usageCache{resp: *resp, expiresAt: time.Now().Add(5 * time.Second)}
+	h.mu.Unlock()
+
+	return resp, nil
+}
+
+func (h *UsageHandler) fetchUsage(ctx context.Context, userSub string) (*UsageResponse, error) {
+	name := PodName(userSub)
+
+	podMetrics, err := h.metrics.MetricsV1beta1().PodMetricses(h.namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		http.Error(w, "pod not found", http.StatusNotFound)
-		return
+		return nil, err
+	}
+
+	pod, err := h.pods.client.CoreV1().Pods(h.namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
 	}
 
 	var cpuUsage, memUsage resource.Quantity
@@ -71,11 +99,68 @@ func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub
 		memPct = float64(memUsage.Value()) / float64(memLimit.Value()) * 100.0
 	}
 
-	resp := UsageResponse{
-		CPUPercent:    cpuPct,
-		MemoryPercent: memPct,
+	return &UsageResponse{CPUPercent: cpuPct, MemoryPercent: memPct}, nil
+}
+
+// GetAllUsage returns current CPU/memory utilization for all run pods.
+// Pods without metrics (e.g. pending) are omitted from the map.
+func (h *UsageHandler) GetAllUsage(ctx context.Context) (map[string]*UsageResponse, error) {
+	podMetricsList, err := h.metrics.MetricsV1beta1().PodMetricses(h.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=run",
+	})
+	if err != nil {
+		return nil, err
 	}
 
+	pods, err := h.pods.client.CoreV1().Pods(h.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=run",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	type podLimits struct{ cpu, mem resource.Quantity }
+	limits := make(map[string]podLimits, len(pods.Items))
+	for _, pod := range pods.Items {
+		for _, c := range pod.Spec.Containers {
+			if c.Name == "shell" {
+				limits[pod.Name] = podLimits{
+					cpu: c.Resources.Limits["cpu"],
+					mem: c.Resources.Limits["memory"],
+				}
+			}
+		}
+	}
+
+	result := make(map[string]*UsageResponse, len(podMetricsList.Items))
+	for _, pm := range podMetricsList.Items {
+		var cpuUsage, memUsage resource.Quantity
+		for _, c := range pm.Containers {
+			if c.Name == "shell" {
+				cpuUsage = c.Usage["cpu"]
+				memUsage = c.Usage["memory"]
+			}
+		}
+		var cpuPct, memPct float64
+		if lim, ok := limits[pm.Name]; ok {
+			if lim.cpu.MilliValue() > 0 {
+				cpuPct = float64(cpuUsage.MilliValue()) / float64(lim.cpu.MilliValue()) * 100.0
+			}
+			if lim.mem.Value() > 0 {
+				memPct = float64(memUsage.Value()) / float64(lim.mem.Value()) * 100.0
+			}
+		}
+		result[pm.Name] = &UsageResponse{CPUPercent: cpuPct, MemoryPercent: memPct}
+	}
+	return result, nil
+}
+
+func (h *UsageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub string) {
+	resp, err := h.GetUsage(r.Context(), userSub)
+	if err != nil {
+		http.Error(w, "metrics unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
