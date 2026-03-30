@@ -239,7 +239,7 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 					ImagePullPolicy: corev1.PullAlways,
 					Command: []string{"/bin/bash", "-c", fmt.Sprintf(`
 USERNAME=%q
-id "$USERNAME" >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash "$USERNAME"
+id "$USERNAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USERNAME"
 echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
 chmod 440 /etc/sudoers.d/"$USERNAME"
 echo "run.pmh.codes" > /etc/hostname
