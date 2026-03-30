@@ -190,7 +190,7 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
   -e 's|http://archive.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
   -e 's|http://security.ubuntu.com/ubuntu/|https://ftp.kaist.ac.kr/ubuntu/|g' \
   -e 's|http://ports.ubuntu.com/ubuntu-ports|https://ftp.kaist.ac.kr/ubuntu-ports|g' \
-  /persist/etc/apt/sources.list 2>/dev/null || true
+  /persist/etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
 `)
 
 	// Build volumeMounts for main container
