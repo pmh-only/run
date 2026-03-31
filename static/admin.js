@@ -23,10 +23,33 @@
   // ── xterm helpers ──────────────────────────────────────────────────
 
   var termOptions = {
-    cursorBlink: false,
+    cursorBlink: true,
+    cursorStyle: 'bar',
+    cursorWidth: 2,
     fontSize: 13,
-    fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-    theme: { background: '#0a0a0a', foreground: '#c8c8c8' },
+    fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+    theme: {
+      background: '#0a0a0a',
+      foreground: '#d4d4d4',
+      cursor: '#d4d4d4',
+      scrollbar: '#222',
+      black: '#1a1a1a',
+      brightBlack: '#555',
+      red: '#f48771',
+      brightRed: '#f48771',
+      green: '#89d185',
+      brightGreen: '#89d185',
+      yellow: '#cca700',
+      brightYellow: '#cca700',
+      blue: '#6796e6',
+      brightBlue: '#6796e6',
+      magenta: '#b267e6',
+      brightMagenta: '#b267e6',
+      cyan: '#56b6c2',
+      brightCyan: '#56b6c2',
+      white: '#d4d4d4',
+      brightWhite: '#ffffff',
+    },
   };
 
   function makeTerminal(container) {
