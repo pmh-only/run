@@ -54,6 +54,7 @@ func main() {
 	}
 
 	type userOverview struct {
+		UserSub       string  `json:"user_sub"`
 		Username      string  `json:"username"`
 		PodName       string  `json:"pod_name"`
 		PodPhase      string  `json:"pod_phase"`
@@ -130,6 +131,7 @@ func main() {
 		result := make([]userOverview, 0, len(pods))
 		for _, pod := range pods {
 			ov := userOverview{
+				UserSub:   pod.UserSub,
 				Username:  pod.Username,
 				PodName:   pod.Name,
 				PodPhase:  pod.Phase,
@@ -147,6 +149,43 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
+	})))
+
+	// Current user info API (requires auth)
+	mux.Handle("GET /api/me", authHandler.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessData, err := sess.Get(r)
+		if err != nil {
+			http.Error(w, "session error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Username string `json:"username"`
+			IsAdmin  bool   `json:"is_admin"`
+		}{
+			Username: session.GetString(sessData, session.KeyUsername),
+			IsAdmin:  session.GetBool(sessData, session.KeyIsAdmin),
+		})
+	})))
+
+	// Admin: watch a user's session (read-only observer WebSocket)
+	mux.Handle("GET /terminal/watch", requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetSub := r.URL.Query().Get("sub")
+		if targetSub == "" {
+			http.Error(w, "missing sub", http.StatusBadRequest)
+			return
+		}
+		termHandler.ServeWatch(w, r, targetSub)
+	})))
+
+	// Admin: root exec session in a pod
+	mux.Handle("GET /terminal/root", requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		podName := r.URL.Query().Get("pod")
+		if podName == "" {
+			http.Error(w, "missing pod", http.StatusBadRequest)
+			return
+		}
+		termHandler.ServeAdminExec(w, r, podName)
 	})))
 
 	// Terminal WebSocket (requires auth)

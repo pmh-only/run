@@ -32,24 +32,26 @@ type resizeMsg struct {
 }
 
 type Handler struct {
-	client     *kubernetes.Clientset
-	restCfg    *rest.Config
-	podManager *k8s.PodManager
-	usage      *k8s.UsageHandler
-	namespace  string
-	upgrader   websocket.Upgrader
-	sessions   *sessionManager
+	client        *kubernetes.Clientset
+	restCfg       *rest.Config
+	podManager    *k8s.PodManager
+	usage         *k8s.UsageHandler
+	namespace     string
+	upgrader      websocket.Upgrader
+	sessions      *sessionManager
+	adminSessions *sessionManager // root exec sessions keyed by pod name
 }
 
 func New(client *kubernetes.Clientset, restCfg *rest.Config, podManager *k8s.PodManager, usage *k8s.UsageHandler, namespace, baseURL string) *Handler {
 	origin, _ := url.Parse(baseURL)
 	return &Handler{
-		client:     client,
-		restCfg:    restCfg,
-		podManager: podManager,
-		usage:      usage,
-		namespace:  namespace,
-		sessions:   newSessionManager(),
+		client:        client,
+		restCfg:       restCfg,
+		podManager:    podManager,
+		usage:         usage,
+		namespace:     namespace,
+		sessions:      newSessionManager(),
+		adminSessions: newSessionManager(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				o := r.Header.Get("Origin")
@@ -131,7 +133,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 		progressBar(100, "Connected!")
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"))
 
-		return newSession(h.client, h.restCfg, h.namespace, pod.Name, username)
+		return newSession(h.client, h.restCfg, h.namespace, pod.Name, []string{"su", "-", username})
 	})
 	if err != nil {
 		log.Printf("session error for user %s: %v", userSub, err)
@@ -170,6 +172,86 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, userSub, use
 	}()
 
 	// Read loop: forward input and resize events to the session.
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		if len(msg) == 0 {
+			continue
+		}
+		switch msg[0] {
+		case msgData:
+			sess.writeStdin(msg[1:])
+		case msgResize:
+			var rm resizeMsg
+			if err := json.Unmarshal(msg[1:], &rm); err == nil {
+				sess.resize(rm.Cols, rm.Rows)
+			}
+		}
+	}
+}
+
+// ServeWatch upgrades to WebSocket and attaches a read-only observer to the target
+// user's session, streaming live stdout to the admin without forwarding any stdin.
+func (h *Handler) ServeWatch(w http.ResponseWriter, r *http.Request, targetUserSub string) {
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("watch websocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	tabIdx, _ := strconv.Atoi(r.URL.Query().Get("tab"))
+	if tabIdx < 0 || tabIdx > 5 {
+		tabIdx = 0
+	}
+	sessionKey := fmt.Sprintf("%s:%d", targetUserSub, tabIdx)
+
+	sess, ok := h.sessions.get(sessionKey)
+	if !ok || !sess.isAlive() {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\033[31mNo active session for this user on tab "+strconv.Itoa(tabIdx)+".\033[0m\r\n"))
+		return
+	}
+
+	sess.addObserver(conn)
+	defer sess.removeObserver(conn)
+
+	// Block until the observer disconnects (read loop discards input).
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			break
+		}
+	}
+}
+
+// ServeAdminExec upgrades to WebSocket and attaches to a persistent root exec session
+// inside the specified pod. The session survives reconnects (keyed by pod name).
+func (h *Handler) ServeAdminExec(w http.ResponseWriter, r *http.Request, podName string) {
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("admin exec websocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	writeLine := func(msg string) {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n"+msg+"\r\n"))
+	}
+
+	sess, err := h.adminSessions.getOrCreate(podName, func() (*session, error) {
+		writeLine("\033[33mOpening root session in " + podName + "...\033[0m")
+		return newSession(h.client, h.restCfg, h.namespace, podName, []string{"/bin/bash"})
+	})
+	if err != nil {
+		log.Printf("admin exec error for pod %s: %v", podName, err)
+		writeLine("\033[31mFailed to open root session: " + err.Error() + "\033[0m")
+		return
+	}
+
+	sess.attach(conn)
+	defer sess.detach(conn)
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {

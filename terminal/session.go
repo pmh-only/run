@@ -17,18 +17,26 @@ import (
 
 const scrollbackSize = 64 * 1024 // 64 KB
 
+// observer is a read-only WebSocket client that receives session stdout.
+type observer struct {
+	ch   chan []byte
+	done chan struct{}
+}
+
 // session holds a running exec for one user, independent of any WS connection.
 type session struct {
 	mu          sync.Mutex
-	writeMu     sync.Mutex // serializes WebSocket writes
+	writeMu     sync.Mutex // serializes writes to wsConn
 	stdinWriter io.WriteCloser
 	scrollback  []byte
-	wsConn      *websocket.Conn // currently attached WS; nil when nobody is connected
+	wsConn      *websocket.Conn            // currently attached WS; nil when nobody is connected
+	observers   map[*websocket.Conn]*observer // admin observers (read-only)
 	sizeQueue   *sizeQueue
 	done        chan struct{} // closed when the exec exits
 }
 
-func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, podName, username string) (*session, error) {
+// newSession creates a persistent exec session in the given pod running command.
+func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, podName string, command []string) (*session, error) {
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
 
@@ -41,7 +49,7 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "shell",
-			Command:   []string{"su", "-", username},
+			Command:   command,
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -59,6 +67,7 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		stdinWriter: stdinWriter,
 		sizeQueue:   sq,
 		done:        make(chan struct{}),
+		observers:   make(map[*websocket.Conn]*observer),
 	}
 
 	// Run exec in background — outlives any single WS connection.
@@ -76,7 +85,7 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		}
 	}()
 
-	// Pump stdout into scrollback and forward to any attached WS.
+	// Pump stdout into scrollback, forward to attached WS, and broadcast to observers.
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -91,9 +100,21 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 				if len(s.scrollback) > scrollbackSize {
 					s.scrollback = s.scrollback[len(s.scrollback)-scrollbackSize:]
 				}
+				// Snapshot observers while holding the lock.
+				obs := make([]*observer, 0, len(s.observers))
+				for _, o := range s.observers {
+					obs = append(obs, o)
+				}
 				s.mu.Unlock()
 
 				s.writeWS(websocket.BinaryMessage, msg)
+
+				for _, o := range obs {
+					select {
+					case o.ch <- msg:
+					default: // drop if the observer is slow
+					}
+				}
 			}
 			if err != nil {
 				break
@@ -103,6 +124,11 @@ func newSession(client *kubernetes.Clientset, restCfg *rest.Config, namespace, p
 		s.mu.Lock()
 		conn := s.wsConn
 		s.wsConn = nil
+		// Close all observer channels.
+		for _, o := range s.observers {
+			close(o.ch)
+		}
+		s.observers = make(map[*websocket.Conn]*observer)
 		s.mu.Unlock()
 		if conn != nil {
 			s.writeMu.Lock()
@@ -126,6 +152,46 @@ func (s *session) writeWS(msgType int, msg []byte) {
 	s.writeMu.Lock()
 	_ = conn.WriteMessage(msgType, msg)
 	s.writeMu.Unlock()
+}
+
+// addObserver registers conn as a read-only observer of this session.
+// The current scrollback is immediately replayed to the new observer.
+func (s *session) addObserver(conn *websocket.Conn) {
+	o := &observer{
+		ch:   make(chan []byte, 256),
+		done: make(chan struct{}),
+	}
+	go func() {
+		defer close(o.done)
+		for msg := range o.ch {
+			_ = conn.WriteMessage(websocket.BinaryMessage, msg)
+		}
+	}()
+
+	s.mu.Lock()
+	// Queue scrollback replay before adding to the broadcast list so ordering is preserved.
+	if len(s.scrollback) > 0 {
+		payload := make([]byte, len(s.scrollback)+1)
+		payload[0] = msgData
+		copy(payload[1:], s.scrollback)
+		o.ch <- payload
+	}
+	s.observers[conn] = o
+	s.mu.Unlock()
+}
+
+// removeObserver unregisters conn as an observer and waits for its write goroutine to exit.
+func (s *session) removeObserver(conn *websocket.Conn) {
+	s.mu.Lock()
+	o, ok := s.observers[conn]
+	if ok {
+		delete(s.observers, conn)
+		close(o.ch)
+	}
+	s.mu.Unlock()
+	if ok {
+		<-o.done
+	}
 }
 
 // attach sets conn as the current WS for this session.
@@ -174,7 +240,7 @@ func (s *session) isAlive() bool {
 	}
 }
 
-// sessionManager holds one session per user.
+// sessionManager holds one session per key.
 type sessionManager struct {
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -182,6 +248,14 @@ type sessionManager struct {
 
 func newSessionManager() *sessionManager {
 	return &sessionManager{sessions: make(map[string]*session)}
+}
+
+// get returns the session for key if it exists (alive or not).
+func (sm *sessionManager) get(key string) (*session, bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	s, ok := sm.sessions[key]
+	return s, ok
 }
 
 // purgeUser removes all sessions belonging to userSub (keys of the form "userSub:N").

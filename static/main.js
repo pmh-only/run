@@ -60,6 +60,17 @@
   var statusEl = document.getElementById('status');
   var tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
 
+  // Show admin nav button if the current user is an admin.
+  fetch('/api/me').then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
+    if (!me || !me.is_admin) return;
+    var btn = document.createElement('a');
+    btn.href = '/admin';
+    btn.className = 'btn';
+    btn.textContent = 'admin';
+    var headerRight = document.getElementById('header-right');
+    headerRight.insertBefore(btn, document.getElementById('restart-btn'));
+  }).catch(function () {});
+
   function sendResize(i) {
     var tab = tabs[i];
     if (!tab.ws || tab.ws.readyState !== WebSocket.OPEN) return;

@@ -37,6 +37,8 @@
   <meta name="twitter:title" content="admin — run.pmh.codes">
   <meta name="twitter:description" content="Admin dashboard for run.pmh.codes — view all user pods, sessions, and resource utilization.">
   <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f5a5.png">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -45,6 +47,8 @@
       background: #0d0d0d;
       font: 13px/1.5 'JetBrains Mono', 'Fira Code', monospace;
       color: #c8c8c8;
+      display: flex;
+      flex-direction: column;
     }
 
     /* ── Header ─────────────────────────────────────── */
@@ -56,13 +60,13 @@
       height: 40px;
       background: #141414;
       border-bottom: 1px solid #2a2a2a;
+      flex-shrink: 0;
     }
 
     #logo { color: #e8e8e8; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; user-select: none; }
     #logo span { color: #555; font-weight: 400; }
 
     #header-right { display: flex; align-items: center; gap: 10px; }
-
     #last-updated { font-size: 12px; color: #444; }
 
     .btn {
@@ -79,14 +83,15 @@
     }
     .btn:hover { border-color: #666; color: #e8e8e8; }
 
-    /* ── Content ─────────────────────────────────────── */
-    #content { padding: 24px; overflow-y: auto; }
-
-    #summary {
-      display: flex;
-      gap: 16px;
-      margin-bottom: 20px;
+    /* ── Main area ───────────────────────────────────── */
+    #main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      min-height: 0;
     }
+
+    #summary { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 
     .stat {
       background: #141414;
@@ -99,11 +104,7 @@
     .stat-value { font-size: 22px; color: #e8e8e8; margin-top: 2px; }
 
     /* ── Table ───────────────────────────────────────── */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
 
     thead th {
       text-align: left;
@@ -122,18 +123,14 @@
     thead th.sort-asc::after  { content: ' ↑'; color: #6796e6; }
     thead th.sort-desc::after { content: ' ↓'; color: #6796e6; }
 
-    tbody tr { border-bottom: 1px solid #1a1a1a; transition: background 0.1s; }
-    tbody tr:hover { background: #141414; }
+    tbody tr { border-bottom: 1px solid #1a1a1a; transition: background 0.1s; cursor: pointer; }
+    tbody tr:hover { background: #161616; }
+    tbody tr.selected { background: #1a2030 !important; }
     tbody td { padding: 9px 12px; vertical-align: middle; }
 
     .username { color: #e8e8e8; }
 
-    .phase {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 3px;
-      font-size: 11px;
-    }
+    .phase { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
     .phase-running  { background: #1a3a1a; color: #89d185; border: 1px solid #2a5a2a; }
     .phase-pending  { background: #3a3000; color: #cca700; border: 1px solid #5a4800; }
     .phase-failed   { background: #3a1a1a; color: #f48771; border: 1px solid #5a2a2a; }
@@ -141,29 +138,96 @@
 
     .bar-cell { min-width: 140px; }
     .bar-wrap { display: flex; align-items: center; gap: 8px; }
-    .bar-bg {
-      flex: 1;
-      height: 4px;
-      background: #222;
-      border-radius: 2px;
-      overflow: hidden;
-    }
+    .bar-bg { flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
     .bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
     .bar-label { width: 40px; text-align: right; color: #666; }
 
-    .dot {
-      display: inline-block;
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      margin-right: 6px;
-      vertical-align: middle;
-    }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
     .dot-on  { background: #89d185; box-shadow: 0 0 4px #89d18566; }
     .dot-off { background: #333; }
 
     .age { color: #555; }
-
     .empty { text-align: center; padding: 48px; color: #444; }
+
+    /* ── Inspector panel ─────────────────────────────── */
+    #inspector {
+      flex-shrink: 0;
+      height: 360px;
+      background: #0a0a0a;
+      border-top: 1px solid #2a2a2a;
+      display: none;
+      flex-direction: column;
+    }
+    #inspector.open { display: flex; }
+
+    #inspector-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      height: 36px;
+      background: #111;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    #inspector-title { color: #e8e8e8; font-size: 12px; flex: 1; }
+    #inspector-title span { color: #6796e6; }
+
+    .insp-tab {
+      padding: 0 12px;
+      height: 36px;
+      line-height: 36px;
+      font-size: 12px;
+      color: #555;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      user-select: none;
+    }
+    .insp-tab:hover { color: #aaa; }
+    .insp-tab.active { color: #e8e8e8; border-bottom-color: #6796e6; }
+
+    #inspector-close {
+      background: none;
+      border: none;
+      color: #555;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    #inspector-close:hover { color: #e8e8e8; }
+
+    .insp-pane { flex: 1; display: none; min-height: 0; }
+    .insp-pane.active { display: flex; flex-direction: column; }
+
+    .insp-term { flex: 1; padding: 4px; min-height: 0; }
+
+    #watch-tab-bar {
+      display: flex;
+      gap: 2px;
+      padding: 4px 8px 0;
+      background: #0a0a0a;
+      flex-shrink: 0;
+    }
+    .watch-tab-btn {
+      padding: 3px 12px;
+      font: 11px/1.5 inherit;
+      color: #555;
+      background: transparent;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+    }
+    .watch-tab-btn:hover { color: #999; }
+    .watch-tab-btn.active { color: #e8e8e8; background: #141414; border-color: #2a2a2a; }
+
+    #watch-status {
+      padding: 6px 16px;
+      font-size: 11px;
+      color: #444;
+      flex-shrink: 0;
+    }
 
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -180,7 +244,7 @@
     </div>
   </div>
 
-  <div id="content">
+  <div id="main">
     <div id="summary">
       <div class="stat">
         <div class="stat-label">total pods</div>
@@ -220,6 +284,31 @@
     </table>
   </div>
 
+  <!-- Session inspector panel -->
+  <div id="inspector">
+    <div id="inspector-header">
+      <div class="insp-tab active" data-pane="watch">watch</div>
+      <div class="insp-tab" data-pane="root">root exec</div>
+      <div id="inspector-title">— select a user row to inspect —</div>
+      <button id="inspector-close">✕</button>
+    </div>
+
+    <!-- Watch pane -->
+    <div id="pane-watch" class="insp-pane active">
+      <div id="watch-tab-bar"></div>
+      <div id="watch-status">not connected</div>
+      <div id="watch-term" class="insp-term"></div>
+    </div>
+
+    <!-- Root exec pane -->
+    <div id="pane-root" class="insp-pane">
+      <div id="root-status" style="padding:6px 16px;font-size:11px;color:#444;flex-shrink:0">not connected</div>
+      <div id="root-term" class="insp-term"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
   <script src="/static/admin.js"></script>
   <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
 </body>
