@@ -121,7 +121,10 @@ func main() {
 			return
 		}
 
-		allUsage, _ := usageHandler.GetAllUsage(r.Context())
+		allUsage, err := usageHandler.GetAllUsage(r.Context())
+		if err != nil {
+			log.Printf("GetAllUsage error: %v", err)
+		}
 		if allUsage == nil {
 			allUsage = make(map[string]*k8sclient.UsageResponse)
 		}

@@ -104,14 +104,10 @@ func (h *UsageHandler) fetchUsage(ctx context.Context, userSub string) (*UsageRe
 
 // GetAllUsage returns current CPU/memory utilization for all run pods.
 // Pods without metrics (e.g. pending) are omitted from the map.
+// The metrics-server List API does not reliably support label selectors, so we
+// fetch all pod metrics and filter client-side against the known run pods.
 func (h *UsageHandler) GetAllUsage(ctx context.Context) (map[string]*UsageResponse, error) {
-	podMetricsList, err := h.metrics.MetricsV1beta1().PodMetricses(h.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=run",
-	})
-	if err != nil {
-		return nil, err
-	}
-
+	// Build limits map from pod specs — only run pods (app=run label).
 	pods, err := h.pods.client.CoreV1().Pods(h.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=run",
 	})
@@ -132,8 +128,19 @@ func (h *UsageHandler) GetAllUsage(ctx context.Context) (map[string]*UsageRespon
 		}
 	}
 
-	result := make(map[string]*UsageResponse, len(podMetricsList.Items))
+	// Fetch all metrics without a label selector (metrics-server has limited
+	// label selector support) and skip pods not in the limits map.
+	podMetricsList, err := h.metrics.MetricsV1beta1().PodMetricses(h.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*UsageResponse, len(limits))
 	for _, pm := range podMetricsList.Items {
+		lim, ok := limits[pm.Name]
+		if !ok {
+			continue
+		}
 		var cpuUsage, memUsage resource.Quantity
 		for _, c := range pm.Containers {
 			if c.Name == "shell" {
@@ -142,13 +149,11 @@ func (h *UsageHandler) GetAllUsage(ctx context.Context) (map[string]*UsageRespon
 			}
 		}
 		var cpuPct, memPct float64
-		if lim, ok := limits[pm.Name]; ok {
-			if lim.cpu.MilliValue() > 0 {
-				cpuPct = float64(cpuUsage.MilliValue()) / float64(lim.cpu.MilliValue()) * 100.0
-			}
-			if lim.mem.Value() > 0 {
-				memPct = float64(memUsage.Value()) / float64(lim.mem.Value()) * 100.0
-			}
+		if lim.cpu.MilliValue() > 0 {
+			cpuPct = float64(cpuUsage.MilliValue()) / float64(lim.cpu.MilliValue()) * 100.0
+		}
+		if lim.mem.Value() > 0 {
+			memPct = float64(memUsage.Value()) / float64(lim.mem.Value()) * 100.0
 		}
 		result[pm.Name] = &UsageResponse{CPUPercent: cpuPct, MemoryPercent: memPct}
 	}
