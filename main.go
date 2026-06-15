@@ -34,7 +34,7 @@ func main() {
 		log.Fatalf("k8s client error: %v", err)
 	}
 
-	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
+	podManager := k8sclient.NewPodManager(k8sClient, cfg.PodNamespace, cfg.PodImage, cfg.PodCPURequest, cfg.PodMemoryRequest, cfg.PodCPULimit, cfg.PodMemoryLimit, cfg.PodStorageSize)
 	usageHandler, err := k8sclient.NewUsageHandler(restCfg, podManager, cfg.PodNamespace)
 	if err != nil {
 		log.Fatalf("usage handler error: %v", err)

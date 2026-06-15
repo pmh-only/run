@@ -23,16 +23,20 @@ type PodManager struct {
 	client      *kubernetes.Clientset
 	namespace   string
 	image       string
+	cpuRequest  string
+	memRequest  string
 	cpuLimit    string
 	memLimit    string
 	storageSize string
 }
 
-func NewPodManager(client *kubernetes.Clientset, namespace, image, cpuLimit, memLimit, storageSize string) *PodManager {
+func NewPodManager(client *kubernetes.Clientset, namespace, image, cpuRequest, memRequest, cpuLimit, memLimit, storageSize string) *PodManager {
 	return &PodManager{
 		client:      client,
 		namespace:   namespace,
 		image:       image,
+		cpuRequest:  cpuRequest,
+		memRequest:  memRequest,
 		cpuLimit:    cpuLimit,
 		memLimit:    memLimit,
 		storageSize: storageSize,
@@ -160,7 +164,7 @@ func (m *PodManager) ensurePVC(ctx context.Context, userSub string) error {
 			Namespace: m.namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			StorageClassName: &storageClass,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -315,7 +319,7 @@ func (m *PodManager) buildPod(name, userSub, username string) *corev1.Pod {
 		Spec: corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
 			AutomountServiceAccountToken: &automount,
-			DNSPolicy: corev1.DNSNone,
+			DNSPolicy:                    corev1.DNSNone,
 			DNSConfig: &corev1.PodDNSConfig{
 				Nameservers: []string{"1.1.1.1"},
 				Searches:    []string{},
@@ -356,6 +360,10 @@ ln -sf /dev/null /etc/systemd/system/systemd-logind.service
 					// k3s mounts /sys/fs/cgroup ro for non-privileged containers.
 					Command: []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; hostname run.pmh.codes 2>/dev/null; exec /sbin/init"},
 					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse(m.cpuRequest),
+							corev1.ResourceMemory: resource.MustParse(m.memRequest),
+						},
 						Limits: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse(m.cpuLimit),
 							corev1.ResourceMemory: resource.MustParse(m.memLimit),
@@ -367,12 +375,12 @@ ln -sf /dev/null /etc/systemd/system/systemd-logind.service
 						Capabilities: &corev1.Capabilities{
 							Add: []corev1.Capability{
 								// Core systemd requirements
-								"SYS_ADMIN",       // cgroup v2, mount, namespace ops
-								"NET_ADMIN",       // systemd-networkd
-								"SYS_RESOURCE",    // setrlimit for service resource limits
+								"SYS_ADMIN",    // cgroup v2, mount, namespace ops
+								"NET_ADMIN",    // systemd-networkd
+								"SYS_RESOURCE", // setrlimit for service resource limits
 								// Process/user management
 								"SETUID", "SETGID", // service user switching
-								"KILL",             // process lifecycle
+								"KILL", // process lifecycle
 								// File permission management (needed during boot)
 								"CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID",
 								// Device and service setup

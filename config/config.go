@@ -16,6 +16,8 @@ type Config struct {
 	PodNamespace     string
 	PodImage         string
 	PodShell         string
+	PodCPURequest    string
+	PodMemoryRequest string
 	PodCPULimit      string
 	PodMemoryLimit   string
 	PodStorageSize   string
@@ -34,6 +36,8 @@ func Load() (*Config, error) {
 		PodNamespace:     getEnv("POD_NAMESPACE", "run"),
 		PodImage:         os.Getenv("POD_IMAGE"),
 		PodShell:         getEnv("POD_SHELL", "/bin/bash"),
+		PodCPURequest:    getEnv("POD_CPU_REQUEST", "1m"),
+		PodMemoryRequest: getEnv("POD_MEMORY_REQUEST", "1Mi"),
 		PodCPULimit:      getEnv("POD_CPU_LIMIT", "500m"),
 		PodMemoryLimit:   getEnv("POD_MEMORY_LIMIT", "256Mi"),
 		PodStorageSize:   getEnv("POD_STORAGE_SIZE", "10Gi"),

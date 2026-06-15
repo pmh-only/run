@@ -10,5 +10,7 @@ data:
   POD_NAMESPACE: "run"
   POD_IMAGE: "ghcr.io/pmh-only/ubuntu-systemd:24.04"
   POD_SHELL: "/bin/bash"
+  POD_CPU_REQUEST: "1m"
+  POD_MEMORY_REQUEST: "1Mi"
   POD_CPU_LIMIT: "500m"
   POD_MEMORY_LIMIT: "256Mi"
